@@ -1,20 +1,15 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { ArrowLeft, Mail, Phone, Sparkles, Calendar, Award } from "lucide-react";
 import { AppLayout } from "@/components/app-layout";
 import { PerformanceBadge } from "@/components/performance-badge";
-import { STUDENTS, avatarUrl, performanceGradient } from "@/data/students";
+import { STUDENTS, avatarUrl, performanceGradient, type Student } from "@/data/students";
 import {
   ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, PolarRadiusAxis,
   AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 
 export const Route = createFileRoute("/students/$id")({
-  loader: ({ params }) => {
-    const student = STUDENTS.find((s) => s.id === params.id);
-    if (!student) throw notFound();
-    return { student };
-  },
   component: StudentDetail,
   notFoundComponent: () => (
     <AppLayout>

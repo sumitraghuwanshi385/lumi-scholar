@@ -21,16 +21,30 @@ export const Route = createFileRoute("/students/$id")({
       </div>
     </AppLayout>
   ),
-  head: ({ loaderData }) => ({
+  head: () => ({
     meta: [
-      { title: `${loaderData?.student.name ?? "Student"} — AurorIQ` },
-      { name: "description", content: `Performance, attendance and AI insights for ${loaderData?.student.name ?? "this student"}.` },
+      { title: "Student profile — AurorIQ" },
+      { name: "description", content: "Performance, attendance and AI insights for this student." },
     ],
   }),
 });
 
 function StudentDetail() {
-  const { student } = Route.useLoaderData();
+  const { id } = Route.useParams();
+  const student: Student | undefined = STUDENTS.find((s) => s.id === id);
+
+  if (!student) {
+    return (
+      <AppLayout>
+        <div className="glass-glow rounded-3xl p-12 text-center">
+          <h2 className="font-display font-bold text-2xl">Student not found</h2>
+          <Link to="/students" className="inline-flex mt-4 items-center gap-2 text-violet font-semibold">
+            <ArrowLeft className="h-4 w-4" /> Back to roster
+          </Link>
+        </div>
+      </AppLayout>
+    );
+  }
 
   // Build attendance heatmap (12 weeks × 7 days)
   const heatmap: { date: string; status: string }[][] = [];

@@ -39,7 +39,7 @@ function Landing() {
         <div className="flex items-center gap-3">
           <ThemeToggle />
           <Link
-            to="/dashboard"
+            to="/auth"
             className="hidden sm:inline-flex items-center gap-2 rounded-full glass px-4 py-2 text-sm font-semibold hover-lift"
           >
             Sign in
@@ -78,17 +78,17 @@ function Landing() {
           className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3"
         >
           <Link
-            to="/dashboard"
+            to="/auth"
             className="group inline-flex items-center gap-2 rounded-full gradient-aurora glow-violet px-7 py-3.5 text-sm font-semibold text-white hover-lift"
           >
-            <Users className="h-4 w-4" /> Teacher Dashboard
+            <Users className="h-4 w-4" /> Get started free
             <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
           </Link>
           <Link
-            to="/students"
+            to="/auth"
             className="inline-flex items-center gap-2 rounded-full glass px-7 py-3.5 text-sm font-semibold hover-lift"
           >
-            <GraduationCap className="h-4 w-4 text-violet" /> Explore as Student
+            <GraduationCap className="h-4 w-4 text-violet" /> Sign in
           </Link>
         </motion.div>
 

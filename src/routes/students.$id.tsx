@@ -1,282 +1,223 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Mail, Phone, Sparkles, Calendar, Award } from "lucide-react";
+import { ArrowLeft, Brain, Sparkles, Loader2, CheckCircle2, AlertTriangle, TrendingUp, Wand2 } from "lucide-react";
 import { AppLayout } from "@/components/app-layout";
+import { AuthGuard } from "@/components/auth-guard";
 import { PerformanceBadge } from "@/components/performance-badge";
-import { STUDENTS, avatarUrl, performanceGradient, type Student } from "@/data/students";
-import {
-  ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar, PolarRadiusAxis,
-  AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
-} from "recharts";
+import { useStudent, performanceFromGpa, performanceGradient, avatarUrl } from "@/lib/students-db";
+import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
+import { predictPerformance, generateRecommendations } from "@/utils/ai.functions";
+import { callAuthed } from "@/lib/call-authed";
+import { toast } from "sonner";
+import { ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 
 export const Route = createFileRoute("/students/$id")({
-  component: StudentDetail,
-  notFoundComponent: () => (
+  component: Page,
+  head: () => ({ meta: [{ title: "Student profile — AurorIQ" }] }),
+});
+
+function Page() {
+  return (
+    <AuthGuard allow={["teacher"]}>
+      <Detail />
+    </AuthGuard>
+  );
+}
+
+interface Score { id: string; subject: string; score: number; max_score: number }
+interface Recommendation { id: string; recommendation: string; category: string; status: string }
+
+function Detail() {
+  const { id } = Route.useParams();
+  const { student, loading } = useStudent(id);
+  const [scores, setScores] = useState<Score[]>([]);
+  const [recs, setRecs] = useState<Recommendation[]>([]);
+  const [analysis, setAnalysis] = useState<{
+    predicted_final_score: number; confidence: number; risk_level: string;
+    summary: string; strengths: string[]; concerns: string[];
+  } | null>(null);
+  const [predicting, setPredicting] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [scoreForm, setScoreForm] = useState({ subject: "Math", score: "85" });
+
+  const predictFn = useServerFn(predictPerformance);
+  const recsFn = useServerFn(generateRecommendations);
+
+  useEffect(() => {
+    if (!id) return;
+    supabase.from("scores").select("*").eq("student_id", id).then(({ data }) => setScores((data ?? []) as unknown as Score[]));
+    supabase.from("ai_recommendations").select("*").eq("student_id", id).order("created_at", { ascending: false }).then(({ data }) => setRecs((data ?? []) as Recommendation[]));
+  }, [id]);
+
+  const addScore = async () => {
+    if (!id) return;
+    const { error, data } = await supabase.from("scores").insert({
+      student_id: id, subject: scoreForm.subject, score: Number(scoreForm.score), max_score: 100,
+    }).select().single();
+    if (error) { toast.error(error.message); return; }
+    setScores((s) => [...s, data as unknown as Score]);
+    toast.success("Score added");
+  };
+
+  const runPrediction = async () => {
+    if (!id) return;
+    setPredicting(true);
+    try {
+      const result = await callAuthed(predictFn, { studentId: id });
+      setAnalysis(result.analysis);
+      toast.success("AI prediction generated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    }
+    setPredicting(false);
+  };
+
+  const runRecs = async () => {
+    if (!id) return;
+    setGenerating(true);
+    try {
+      const { items } = await callAuthed(recsFn, { studentId: id });
+      setRecs((prev) => [...(items as Recommendation[]), ...prev]);
+      toast.success("Recommendations generated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    }
+    setGenerating(false);
+  };
+
+  const toggleRec = async (rec: Recommendation) => {
+    const newStatus = rec.status === "done" ? "pending" : "done";
+    const { error } = await supabase.from("ai_recommendations").update({ status: newStatus }).eq("id", rec.id);
+    if (error) { toast.error(error.message); return; }
+    setRecs((prev) => prev.map((r) => r.id === rec.id ? { ...r, status: newStatus } : r));
+  };
+
+  if (loading) return (
+    <AppLayout><div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-violet" /></div></AppLayout>
+  );
+  if (!student) return (
     <AppLayout>
       <div className="glass-glow rounded-3xl p-12 text-center">
         <h2 className="font-display font-bold text-2xl">Student not found</h2>
-        <Link to="/students" className="inline-flex mt-4 items-center gap-2 text-violet font-semibold">
-          <ArrowLeft className="h-4 w-4" /> Back to roster
-        </Link>
+        <Link to="/students" className="mt-4 inline-flex text-sm text-violet font-semibold">← Back to roster</Link>
       </div>
     </AppLayout>
-  ),
-  head: () => ({
-    meta: [
-      { title: "Student profile — AurorIQ" },
-      { name: "description", content: "Performance, attendance and AI insights for this student." },
-    ],
-  }),
-});
+  );
 
-function StudentDetail() {
-  const { id } = Route.useParams();
-  const student: Student | undefined = STUDENTS.find((s) => s.id === id);
-
-  if (!student) {
-    return (
-      <AppLayout>
-        <div className="glass-glow rounded-3xl p-12 text-center">
-          <h2 className="font-display font-bold text-2xl">Student not found</h2>
-          <Link to="/students" className="inline-flex mt-4 items-center gap-2 text-violet font-semibold">
-            <ArrowLeft className="h-4 w-4" /> Back to roster
-          </Link>
-        </div>
-      </AppLayout>
-    );
-  }
-
-  // Build attendance heatmap (12 weeks × 7 days)
-  const heatmap: { date: string; status: string }[][] = [];
-  const log = student.attendanceLog;
-  for (let w = 0; w < 12; w++) heatmap.push(log.slice(w * 7, w * 7 + 7));
+  const perf = performanceFromGpa(Number(student.gpa), Number(student.attendance_pct));
+  const radarData = scores.length ? scores.map((s) => ({ subject: s.subject, score: Math.round((Number(s.score) / Number(s.max_score)) * 100) })) :
+    ["Math", "Science", "English", "History", "CS"].map((s) => ({ subject: s, score: 0 }));
 
   return (
     <AppLayout>
-      <Link to="/students" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4">
-        <ArrowLeft className="h-4 w-4" /> Back to roster
+      <Link to="/students" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <ArrowLeft className="h-3.5 w-3.5" /> Back to roster
       </Link>
 
-      {/* Header banner */}
-      <motion.div
-        initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-        className="relative rounded-3xl overflow-hidden mb-6"
-      >
-        <div className={`h-40 sm:h-48 ${performanceGradient(student.performance)} relative`}>
-          <div className="absolute inset-0 opacity-40 mix-blend-overlay"
-            style={{ background: "radial-gradient(circle at 20% 30%, white, transparent 50%), radial-gradient(circle at 80% 70%, white, transparent 50%)" }} />
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="glass-glow rounded-3xl overflow-hidden mb-6">
+        <div className={`h-32 ${performanceGradient(perf)} relative`}>
+          <div className="absolute inset-0 opacity-30 mix-blend-overlay" style={{ background: "radial-gradient(circle at 30% 50%, white, transparent 60%)" }} />
         </div>
-        <div className="glass border-t-0 rounded-b-3xl px-5 sm:px-8 pb-6 pt-0">
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 -mt-14 sm:-mt-16">
-            <div className="flex items-end gap-4">
-              <img
-                src={avatarUrl(student.name)}
-                alt={student.name}
-                className="h-28 w-28 sm:h-32 sm:w-32 rounded-3xl bg-card ring-4 ring-card object-cover"
-              />
-              <div className="pb-2">
-                <PerformanceBadge performance={student.performance} className="mb-2" />
-                <h1 className="font-display font-extrabold text-2xl sm:text-3xl leading-tight">{student.name}</h1>
-                <div className="text-sm text-muted-foreground">{student.id} · Grade {student.grade}-{student.section}</div>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 sm:pb-2">
-              <button className="inline-flex items-center gap-2 rounded-xl gradient-violet glow-violet text-white px-4 py-2 text-sm font-semibold hover-lift">
-                <Sparkles className="h-4 w-4" /> AI Insights
-              </button>
-              <button className="inline-flex items-center gap-2 rounded-xl glass px-4 py-2 text-sm font-semibold hover-lift">
-                <Mail className="h-4 w-4" /> Contact Parent
-              </button>
-            </div>
+        <div className="px-6 sm:px-8 pb-6 -mt-14 flex flex-col sm:flex-row sm:items-end gap-4">
+          <img src={avatarUrl(student.name)} alt={student.name} className="h-28 w-28 rounded-2xl bg-card ring-4 ring-card" />
+          <div className="flex-1">
+            <h1 className="font-display font-extrabold text-3xl">{student.name}</h1>
+            <div className="text-sm text-muted-foreground">Grade {student.grade}-{student.section} · GPA {Number(student.gpa).toFixed(2)} · {Math.round(Number(student.attendance_pct))}% attendance</div>
           </div>
+          <PerformanceBadge performance={perf} />
         </div>
       </motion.div>
 
-      <div className="grid lg:grid-cols-3 gap-5">
-        {/* Quick stats */}
-        <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { l: "GPA", v: student.gpa },
-            { l: "Attendance", v: `${student.attendance}%` },
-            { l: "Avg score", v: Math.round(student.scores.reduce((a, b) => a + b.score, 0) / student.scores.length) },
-            { l: "Achievements", v: student.achievements.length },
-          ].map((s) => (
-            <div key={s.l} className="glass rounded-2xl p-4">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{s.l}</div>
-              <div className="font-display font-bold text-2xl mt-1 text-gradient">{s.v}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Radar */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
-          className="glass-glow rounded-3xl p-6"
-        >
-          <h3 className="font-display font-bold text-lg mb-1">Subject mastery</h3>
-          <p className="text-xs text-muted-foreground mb-3">Multi-subject performance map</p>
+      <div className="grid lg:grid-cols-3 gap-5 mb-6">
+        <div className="glass-glow rounded-3xl p-6 lg:col-span-2">
+          <h3 className="font-display font-bold text-lg mb-2">Subject mastery</h3>
+          <p className="text-xs text-muted-foreground mb-4">Live from latest scores</p>
           <div className="h-72">
             <ResponsiveContainer>
-              <RadarChart data={student.scores} outerRadius="75%">
-                <defs>
-                  <linearGradient id={`r-${student.id}`} x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor="var(--violet)" />
-                    <stop offset="100%" stopColor="var(--electric)" />
-                  </linearGradient>
-                </defs>
+              <RadarChart data={radarData}>
                 <PolarGrid stroke="var(--border)" />
-                <PolarAngleAxis dataKey="subject" tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} />
-                <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
-                <Radar dataKey="score" stroke="var(--violet)" strokeWidth={2} fill={`url(#r-${student.id})`} fillOpacity={0.55} />
-                <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 12 }} />
+                <PolarAngleAxis dataKey="subject" tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} />
+                <PolarRadiusAxis domain={[0, 100]} tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} />
+                <Radar dataKey="score" stroke="var(--violet)" fill="var(--violet)" fillOpacity={0.4} />
               </RadarChart>
             </ResponsiveContainer>
           </div>
-        </motion.div>
-
-        {/* Trend */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.15 }}
-          className="glass-glow rounded-3xl p-6 lg:col-span-2"
-        >
-          <h3 className="font-display font-bold text-lg mb-1">Grade trend</h3>
-          <p className="text-xs text-muted-foreground mb-3">Last 6 months</p>
-          <div className="h-72">
-            <ResponsiveContainer>
-              <AreaChart data={student.trend} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
-                <defs>
-                  <linearGradient id={`gt-${student.id}`} x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="var(--coral)" stopOpacity={0.7} />
-                    <stop offset="100%" stopColor="var(--coral)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="var(--border)" strokeDasharray="3 6" vertical={false} />
-                <XAxis dataKey="month" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} domain={[40, 100]} />
-                <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 12 }} />
-                <Area type="monotone" dataKey="score" stroke="var(--coral)" strokeWidth={2.5} fill={`url(#gt-${student.id})`} />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="flex gap-2 mt-4 flex-wrap items-end">
+            <select value={scoreForm.subject} onChange={(e) => setScoreForm({ ...scoreForm, subject: e.target.value })} className="bg-background/60 rounded-xl px-3 py-2 text-sm border border-border">
+              {["Math", "Science", "English", "History", "CS"].map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <input type="number" value={scoreForm.score} onChange={(e) => setScoreForm({ ...scoreForm, score: e.target.value })} className="bg-background/60 rounded-xl px-3 py-2 text-sm border border-border w-24" placeholder="Score" />
+            <button onClick={addScore} className="rounded-xl gradient-violet glow-violet px-4 py-2 text-xs font-semibold text-white hover-lift">Add score</button>
           </div>
-        </motion.div>
+        </div>
 
-        {/* Subjects breakdown */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }}
-          className="glass-glow rounded-3xl p-6"
-        >
-          <h3 className="font-display font-bold text-lg mb-3">Subjects</h3>
-          <div className="space-y-3">
-            {student.scores.map((s, i) => (
-              <div key={s.subject}>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-medium">{s.subject}</span>
-                  <span className="font-display font-bold">{s.score}</span>
-                </div>
-                <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }} animate={{ width: `${s.score}%` }}
-                    transition={{ duration: 0.8, delay: 0.3 + i * 0.07 }}
-                    className={`h-full ${
-                      s.score >= 85 ? "gradient-emerald" : s.score >= 70 ? "gradient-electric" : s.score >= 55 ? "gradient-gold" : "gradient-coral"
-                    }`}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Engagement */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.25 }}
-          className="glass-glow rounded-3xl p-6"
-        >
-          <h3 className="font-display font-bold text-lg mb-3">Engagement</h3>
-          <div className="space-y-4">
-            {[
-              { l: "Participation", v: student.engagement.participation, g: "gradient-violet" },
-              { l: "Homework submission", v: student.engagement.homework, g: "gradient-electric" },
-              { l: "Extra activities", v: student.engagement.activities, g: "gradient-emerald" },
-            ].map((m) => (
-              <div key={m.l}>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="font-medium">{m.l}</span>
-                  <span className="font-display font-bold">{m.v}%</span>
-                </div>
-                <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <div className={`h-full ${m.g}`} style={{ width: `${m.v}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-5 pt-4 border-t border-border/50">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2 inline-flex items-center gap-1.5">
-              <Award className="h-3 w-3" /> Achievements
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {student.achievements.length > 0 ? student.achievements.map((a) => (
-                <span key={a} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold gradient-gold text-white">
-                  {a}
-                </span>
-              )) : <span className="text-xs text-muted-foreground">No badges yet — keep going!</span>}
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Attendance heatmap */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.3 }}
-          className="glass-glow rounded-3xl p-6 lg:col-span-2"
-        >
+        <div className="glass-glow rounded-3xl p-6">
           <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="font-display font-bold text-lg">Attendance heatmap</h3>
-              <p className="text-xs text-muted-foreground">Last 12 weeks</p>
-            </div>
-            <div className="hidden sm:flex items-center gap-3 text-[11px]">
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald" /> Present</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-gold" /> Late</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-coral" /> Absent</span>
-            </div>
+            <h3 className="font-display font-bold text-lg flex items-center gap-2"><Brain className="h-4 w-4 text-violet" /> AI Prediction</h3>
           </div>
-          <div className="flex gap-1 overflow-x-auto pb-2">
-            {heatmap.map((week, wi) => (
-              <div key={wi} className="flex flex-col gap-1">
-                {week.map((d) => (
-                  <div
-                    key={d.date}
-                    title={`${d.date} · ${d.status}`}
-                    className={`h-4 w-4 rounded-sm ${
-                      d.status === "present" ? "bg-emerald" : d.status === "late" ? "bg-gold" : "bg-coral"
-                    } opacity-90 hover:opacity-100 hover:scale-125 transition-all`}
-                  />
-                ))}
+          {!analysis ? (
+            <div className="text-center py-6">
+              <div className="h-16 w-16 mx-auto rounded-2xl gradient-aurora glow-violet flex items-center justify-center mb-3">
+                <Sparkles className="h-7 w-7 text-white" />
               </div>
+              <p className="text-xs text-muted-foreground mb-4">Run real-time AI to predict finals score & risk.</p>
+              <button onClick={runPrediction} disabled={predicting} className="inline-flex items-center gap-2 rounded-xl gradient-aurora glow-violet px-4 py-2 text-xs font-semibold text-white hover-lift disabled:opacity-60">
+                {predicting ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyzing…</> : <><Wand2 className="h-3.5 w-3.5" /> Run AI prediction</>}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-center">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Predicted finals</div>
+                <div className="font-display font-extrabold text-4xl text-gradient">{analysis.predicted_final_score}</div>
+                <div className="text-[10px] text-muted-foreground">{analysis.confidence}% confidence · {analysis.risk_level} risk</div>
+              </div>
+              <p className="text-xs text-muted-foreground border-l-2 border-violet pl-3">{analysis.summary}</p>
+              <div>
+                <div className="text-[10px] uppercase font-semibold text-emerald mb-1">Strengths</div>
+                <ul className="space-y-1">{analysis.strengths.map((s, i) => <li key={i} className="text-xs flex gap-1.5"><CheckCircle2 className="h-3 w-3 text-emerald shrink-0 mt-0.5" />{s}</li>)}</ul>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase font-semibold text-coral mb-1">Concerns</div>
+                <ul className="space-y-1">{analysis.concerns.map((s, i) => <li key={i} className="text-xs flex gap-1.5"><AlertTriangle className="h-3 w-3 text-coral shrink-0 mt-0.5" />{s}</li>)}</ul>
+              </div>
+              <button onClick={runPrediction} disabled={predicting} className="w-full text-[11px] text-muted-foreground hover:text-foreground">
+                {predicting ? "Re-running…" : "↻ Re-analyze"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="glass-glow rounded-3xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-display font-bold text-lg flex items-center gap-2"><TrendingUp className="h-4 w-4 text-violet" /> AI Recommendations</h3>
+            <p className="text-xs text-muted-foreground">Personalized actions to lift this student's outcomes</p>
+          </div>
+          <button onClick={runRecs} disabled={generating} className="inline-flex items-center gap-2 rounded-xl gradient-aurora glow-violet px-4 py-2 text-xs font-semibold text-white hover-lift disabled:opacity-60">
+            {generating ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</> : <><Wand2 className="h-3.5 w-3.5" /> Generate</>}
+          </button>
+        </div>
+        {recs.length === 0 ? (
+          <div className="text-center py-8 text-sm text-muted-foreground">No recommendations yet. Click "Generate" to get AI-powered ideas.</div>
+        ) : (
+          <ul className="space-y-2">
+            {recs.map((r) => (
+              <li key={r.id} className={`flex items-start gap-3 p-3 rounded-xl bg-accent/30 hover:bg-accent/50 transition-colors ${r.status === "done" ? "opacity-60" : ""}`}>
+                <button onClick={() => toggleRec(r)} className={`mt-0.5 h-5 w-5 rounded-md flex items-center justify-center border ${r.status === "done" ? "gradient-emerald border-transparent text-white" : "border-border bg-background/60"}`}>
+                  {r.status === "done" && <CheckCircle2 className="h-3.5 w-3.5" />}
+                </button>
+                <div className="flex-1">
+                  <div className={`text-sm ${r.status === "done" ? "line-through" : ""}`}>{r.recommendation}</div>
+                  <span className="inline-block mt-1 text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full bg-violet/15 text-violet">{r.category.replace("_", " ")}</span>
+                </div>
+              </li>
             ))}
-          </div>
-        </motion.div>
-
-        {/* Notes + parent */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.35 }}
-          className="glass-glow rounded-3xl p-6 lg:col-span-2"
-        >
-          <h3 className="font-display font-bold text-lg mb-2">Teacher notes</h3>
-          <p className="text-sm text-muted-foreground leading-relaxed">{student.notes}</p>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.4 }}
-          className="glass-glow rounded-3xl p-6"
-        >
-          <h3 className="font-display font-bold text-lg mb-3">Parent contact</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-violet" /> {student.parentContact}</div>
-            <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-electric" /> parent.{student.id.toLowerCase()}@school.edu</div>
-            <div className="flex items-center gap-2 text-muted-foreground"><Calendar className="h-4 w-4" /> Enrolled {student.enrolledDate}</div>
-          </div>
-        </motion.div>
+          </ul>
+        )}
       </div>
     </AppLayout>
   );

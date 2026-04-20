@@ -1,40 +1,50 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal, Loader2, Users } from "lucide-react";
 import { AppLayout } from "@/components/app-layout";
+import { AuthGuard } from "@/components/auth-guard";
 import { PerformanceBadge } from "@/components/performance-badge";
-import { STUDENTS, avatarUrl, performanceGradient, type Performance } from "@/data/students";
+import { useStudents, performanceFromGpa, performanceGradient, avatarUrl, type Performance } from "@/lib/students-db";
 
 export const Route = createFileRoute("/students/")({
-  component: StudentRoster,
-  head: () => ({
-    meta: [
-      { title: "Students — AurorIQ" },
-      { name: "description", content: "Browse, search and filter your full student roster with performance signals." },
-    ],
-  }),
+  component: Page,
+  head: () => ({ meta: [{ title: "Students — AurorIQ" }] }),
 });
 
 const FILTERS: (Performance | "All")[] = ["All", "Excellent", "Good", "At Risk", "Critical"];
 
-function StudentRoster() {
+function Page() {
+  return (
+    <AuthGuard allow={["teacher"]}>
+      <Roster />
+    </AuthGuard>
+  );
+}
+
+function Roster() {
+  const { students, loading } = useStudents();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [sort, setSort] = useState<"name" | "gpa" | "attendance">("gpa");
 
+  const enriched = students.map((s) => ({
+    ...s,
+    perf: performanceFromGpa(Number(s.gpa), Number(s.attendance_pct)),
+  }));
+
   const filtered = useMemo(() => {
-    return STUDENTS
+    return enriched
       .filter((s) =>
-        (filter === "All" || s.performance === filter) &&
-        (q === "" || s.name.toLowerCase().includes(q.toLowerCase()) || s.id.toLowerCase().includes(q.toLowerCase())),
+        (filter === "All" || s.perf === filter) &&
+        (q === "" || s.name.toLowerCase().includes(q.toLowerCase())),
       )
       .sort((a, b) => {
         if (sort === "name") return a.name.localeCompare(b.name);
-        if (sort === "attendance") return b.attendance - a.attendance;
-        return b.gpa - a.gpa;
+        if (sort === "attendance") return Number(b.attendance_pct) - Number(a.attendance_pct);
+        return Number(b.gpa) - Number(a.gpa);
       });
-  }, [q, filter, sort]);
+  }, [enriched, q, filter, sort]);
 
   return (
     <AppLayout>
@@ -43,18 +53,17 @@ function StudentRoster() {
           Student <span className="text-gradient">Roster</span>
         </h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          {filtered.length} of {STUDENTS.length} students · live performance signals
+          {loading ? "Loading…" : `${filtered.length} of ${students.length} students`}
         </p>
       </div>
 
-      {/* Controls */}
       <div className="glass-glow rounded-2xl p-4 mb-6 flex flex-col lg:flex-row lg:items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by name or ID…"
+            placeholder="Search by name…"
             className="w-full bg-background/60 rounded-xl pl-10 pr-4 py-2.5 text-sm border border-border focus:outline-none focus:ring-2 focus:ring-ring transition"
           />
         </div>
@@ -85,12 +94,19 @@ function StudentRoster() {
         </div>
       </div>
 
-      {/* Grid */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="glass-glow rounded-3xl p-16 flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-violet" />
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="glass-glow rounded-3xl p-12 text-center">
-          <div className="mx-auto h-20 w-20 rounded-full gradient-aurora opacity-50 mb-4" />
-          <h3 className="font-display font-bold text-xl">No students match</h3>
-          <p className="text-sm text-muted-foreground mt-1">Try clearing filters or searching a different name.</p>
+          <div className="mx-auto h-20 w-20 rounded-3xl gradient-aurora opacity-50 mb-4 flex items-center justify-center">
+            <Users className="h-10 w-10 text-white" />
+          </div>
+          <h3 className="font-display font-bold text-xl">{students.length === 0 ? "No students yet" : "No matches"}</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            {students.length === 0 ? "Add your first student from the dashboard." : "Try a different filter or search."}
+          </p>
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -101,36 +117,27 @@ function StudentRoster() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: Math.min(i * 0.03, 0.4) }}
             >
-              <Link
-                to="/students/$id"
-                params={{ id: s.id }}
-                className="block glass-glow rounded-3xl overflow-hidden hover-lift group"
-              >
-                <div className={`h-20 ${performanceGradient(s.performance)} relative`}>
-                  <div className="absolute inset-0 opacity-30 mix-blend-overlay"
-                    style={{ background: "radial-gradient(circle at 30% 50%, white, transparent 60%)" }} />
+              <Link to="/students/$id" params={{ id: s.id }} className="block glass-glow rounded-3xl overflow-hidden hover-lift group">
+                <div className={`h-20 ${performanceGradient(s.perf)} relative`}>
+                  <div className="absolute inset-0 opacity-30 mix-blend-overlay" style={{ background: "radial-gradient(circle at 30% 50%, white, transparent 60%)" }} />
                 </div>
                 <div className="px-5 pb-5 -mt-10">
                   <div className="flex items-end justify-between">
-                    <img
-                      src={avatarUrl(s.name)}
-                      alt={s.name}
-                      className="h-20 w-20 rounded-2xl bg-card ring-4 ring-card object-cover"
-                    />
-                    <PerformanceBadge performance={s.performance} />
+                    <img src={avatarUrl(s.name)} alt={s.name} className="h-20 w-20 rounded-2xl bg-card ring-4 ring-card object-cover" />
+                    <PerformanceBadge performance={s.perf} />
                   </div>
                   <div className="mt-3">
                     <div className="font-display font-bold text-base truncate">{s.name}</div>
-                    <div className="text-xs text-muted-foreground">{s.id} · Grade {s.grade}-{s.section}</div>
+                    <div className="text-xs text-muted-foreground">Grade {s.grade}-{s.section}</div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 mt-4">
                     <div className="rounded-xl bg-accent/40 px-3 py-2">
                       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">GPA</div>
-                      <div className="font-display font-bold">{s.gpa}</div>
+                      <div className="font-display font-bold">{Number(s.gpa).toFixed(2)}</div>
                     </div>
                     <div className="rounded-xl bg-accent/40 px-3 py-2">
                       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Attendance</div>
-                      <div className="font-display font-bold">{s.attendance}%</div>
+                      <div className="font-display font-bold">{Math.round(Number(s.attendance_pct))}%</div>
                     </div>
                   </div>
                 </div>

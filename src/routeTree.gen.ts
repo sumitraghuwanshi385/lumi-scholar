@@ -17,7 +17,10 @@ import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StudentsIndexRouteImport } from './routes/students.index'
+import { Route as PortalIndexRouteImport } from './routes/portal.index'
 import { Route as StudentsIdRouteImport } from './routes/students.$id'
+import { Route as PortalPlanRouteImport } from './routes/portal.plan'
+import { Route as PortalBadgesRouteImport } from './routes/portal.badges'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -59,9 +62,24 @@ const StudentsIndexRoute = StudentsIndexRouteImport.update({
   path: '/students/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PortalIndexRoute = PortalIndexRouteImport.update({
+  id: '/portal/',
+  path: '/portal/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StudentsIdRoute = StudentsIdRouteImport.update({
   id: '/students/$id',
   path: '/students/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalPlanRoute = PortalPlanRouteImport.update({
+  id: '/portal/plan',
+  path: '/portal/plan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalBadgesRoute = PortalBadgesRouteImport.update({
+  id: '/portal/badges',
+  path: '/portal/badges',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -73,7 +91,10 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/insights': typeof InsightsRoute
   '/settings': typeof SettingsRoute
+  '/portal/badges': typeof PortalBadgesRoute
+  '/portal/plan': typeof PortalPlanRoute
   '/students/$id': typeof StudentsIdRoute
+  '/portal/': typeof PortalIndexRoute
   '/students/': typeof StudentsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -84,7 +105,10 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/insights': typeof InsightsRoute
   '/settings': typeof SettingsRoute
+  '/portal/badges': typeof PortalBadgesRoute
+  '/portal/plan': typeof PortalPlanRoute
   '/students/$id': typeof StudentsIdRoute
+  '/portal': typeof PortalIndexRoute
   '/students': typeof StudentsIndexRoute
 }
 export interface FileRoutesById {
@@ -96,7 +120,10 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/insights': typeof InsightsRoute
   '/settings': typeof SettingsRoute
+  '/portal/badges': typeof PortalBadgesRoute
+  '/portal/plan': typeof PortalPlanRoute
   '/students/$id': typeof StudentsIdRoute
+  '/portal/': typeof PortalIndexRoute
   '/students/': typeof StudentsIndexRoute
 }
 export interface FileRouteTypes {
@@ -109,7 +136,10 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/insights'
     | '/settings'
+    | '/portal/badges'
+    | '/portal/plan'
     | '/students/$id'
+    | '/portal/'
     | '/students/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -120,7 +150,10 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/insights'
     | '/settings'
+    | '/portal/badges'
+    | '/portal/plan'
     | '/students/$id'
+    | '/portal'
     | '/students'
   id:
     | '__root__'
@@ -131,7 +164,10 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/insights'
     | '/settings'
+    | '/portal/badges'
+    | '/portal/plan'
     | '/students/$id'
+    | '/portal/'
     | '/students/'
   fileRoutesById: FileRoutesById
 }
@@ -143,7 +179,10 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   InsightsRoute: typeof InsightsRoute
   SettingsRoute: typeof SettingsRoute
+  PortalBadgesRoute: typeof PortalBadgesRoute
+  PortalPlanRoute: typeof PortalPlanRoute
   StudentsIdRoute: typeof StudentsIdRoute
+  PortalIndexRoute: typeof PortalIndexRoute
   StudentsIndexRoute: typeof StudentsIndexRoute
 }
 
@@ -205,11 +244,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/portal/': {
+      id: '/portal/'
+      path: '/portal'
+      fullPath: '/portal/'
+      preLoaderRoute: typeof PortalIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/students/$id': {
       id: '/students/$id'
       path: '/students/$id'
       fullPath: '/students/$id'
       preLoaderRoute: typeof StudentsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portal/plan': {
+      id: '/portal/plan'
+      path: '/portal/plan'
+      fullPath: '/portal/plan'
+      preLoaderRoute: typeof PortalPlanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portal/badges': {
+      id: '/portal/badges'
+      path: '/portal/badges'
+      fullPath: '/portal/badges'
+      preLoaderRoute: typeof PortalBadgesRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -223,7 +283,10 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   InsightsRoute: InsightsRoute,
   SettingsRoute: SettingsRoute,
+  PortalBadgesRoute: PortalBadgesRoute,
+  PortalPlanRoute: PortalPlanRoute,
   StudentsIdRoute: StudentsIdRoute,
+  PortalIndexRoute: PortalIndexRoute,
   StudentsIndexRoute: StudentsIndexRoute,
 }
 export const routeTree = rootRouteImport

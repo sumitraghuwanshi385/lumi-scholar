@@ -39,7 +39,7 @@ function Landing() {
         <div className="flex items-center gap-3">
           <ThemeToggle />
           <Link
-            to="/dashboard"
+            to="/auth"
             className="hidden sm:inline-flex items-center gap-2 rounded-full glass px-4 py-2 text-sm font-semibold hover-lift"
           >
             Sign in

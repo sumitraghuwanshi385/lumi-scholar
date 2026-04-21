@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Brain, Sparkles, Loader2, CheckCircle2, AlertTriangle, TrendingUp, Wand2 } from "lucide-react";
+import { ArrowLeft, Brain, Sparkles, Loader2, CheckCircle2, AlertTriangle, TrendingUp, Wand2, Link2, LinkIcon, Unlink } from "lucide-react";
 import { AppLayout } from "@/components/app-layout";
 import { AuthGuard } from "@/components/auth-guard";
 import { PerformanceBadge } from "@/components/performance-badge";
@@ -9,8 +9,12 @@ import { useStudent, performanceFromGpa, performanceGradient, avatarUrl } from "
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { predictPerformance, generateRecommendations } from "@/utils/ai.functions";
+import { linkStudentAccount, unlinkStudentAccount } from "@/utils/students.functions";
 import { callAuthed } from "@/lib/call-authed";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 
 export const Route = createFileRoute("/students/$id")({
@@ -42,14 +46,54 @@ function Detail() {
   const [generating, setGenerating] = useState(false);
   const [scoreForm, setScoreForm] = useState({ subject: "Math", score: "85" });
 
+  // Link Account state
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
+
   const predictFn = useServerFn(predictPerformance);
   const recsFn = useServerFn(generateRecommendations);
+  const linkFn = useServerFn(linkStudentAccount);
+  const unlinkFn = useServerFn(unlinkStudentAccount);
 
   useEffect(() => {
     if (!id) return;
     supabase.from("scores").select("*").eq("student_id", id).then(({ data }) => setScores((data ?? []) as unknown as Score[]));
     supabase.from("ai_recommendations").select("*").eq("student_id", id).order("created_at", { ascending: false }).then(({ data }) => setRecs((data ?? []) as Recommendation[]));
   }, [id]);
+
+  useEffect(() => {
+    setLinkedUserId(student?.user_id ?? null);
+  }, [student?.user_id]);
+
+  const linkAccount = async () => {
+    if (!id) return;
+    setLinking(true);
+    try {
+      const res = await callAuthed(linkFn, { studentId: id, email: linkEmail });
+      setLinkedUserId(res.linkedUserId);
+      toast.success(`Linked ${res.studentName} to ${linkEmail}`);
+      setLinkOpen(false);
+      setLinkEmail("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to link account");
+    }
+    setLinking(false);
+  };
+
+  const unlinkAccount = async () => {
+    if (!id) return;
+    setLinking(true);
+    try {
+      await callAuthed(unlinkFn, { studentId: id });
+      setLinkedUserId(null);
+      toast.success("Account unlinked");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to unlink");
+    }
+    setLinking(false);
+  };
 
   const addScore = async () => {
     if (!id) return;
@@ -127,6 +171,72 @@ function Detail() {
             <div className="text-sm text-muted-foreground">Grade {student.grade}-{student.section} · GPA {Number(student.gpa).toFixed(2)} · {Math.round(Number(student.attendance_pct))}% attendance</div>
           </div>
           <PerformanceBadge performance={perf} />
+        </div>
+        <div className="px-6 sm:px-8 pb-6 -mt-2">
+          <div className="flex flex-wrap items-center gap-3 p-3 rounded-2xl bg-accent/30 border border-border/40">
+            <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${linkedUserId ? "gradient-emerald" : "bg-muted"}`}>
+              <Link2 className="h-4 w-4 text-white" />
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <div className="text-xs font-semibold">
+                {linkedUserId ? "Account linked" : "No student account linked"}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {linkedUserId
+                  ? "This student can sign in to their self-portal and see this profile."
+                  : "Link a signed-up student's email so they can access their portal."}
+              </div>
+            </div>
+            {linkedUserId ? (
+              <button
+                onClick={unlinkAccount}
+                disabled={linking}
+                className="inline-flex items-center gap-1.5 rounded-xl glass px-3 py-2 text-xs font-semibold hover-lift disabled:opacity-60"
+              >
+                <Unlink className="h-3.5 w-3.5" /> Unlink
+              </button>
+            ) : (
+              <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+                <DialogTrigger asChild>
+                  <button className="inline-flex items-center gap-1.5 rounded-xl gradient-violet glow-violet px-3 py-2 text-xs font-semibold text-white hover-lift">
+                    <LinkIcon className="h-3.5 w-3.5" /> Link account
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="glass-glow border-border">
+                  <DialogHeader>
+                    <DialogTitle className="font-display">Link student account</DialogTitle>
+                    <DialogDescription>
+                      Enter the email the student used to sign up. They must already have created a Student account.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3 mt-2">
+                    <div>
+                      <Label>Student email</Label>
+                      <Input
+                        type="email"
+                        value={linkEmail}
+                        onChange={(e) => setLinkEmail(e.target.value)}
+                        placeholder="student@school.edu"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="text-[11px] text-muted-foreground rounded-lg bg-accent/40 p-2.5">
+                      Tip: ask the student to sign up at <span className="font-mono">/auth</span> and pick the “Student” role first.
+                    </div>
+                  </div>
+                  <DialogFooter className="mt-4">
+                    <button
+                      onClick={linkAccount}
+                      disabled={linking || !linkEmail.trim()}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl gradient-aurora glow-violet px-5 py-2.5 text-sm font-semibold text-white hover-lift disabled:opacity-60"
+                    >
+                      {linking ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Linking…</> : <><LinkIcon className="h-3.5 w-3.5" /> Link account</>}
+                    </button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
         </div>
       </motion.div>
 

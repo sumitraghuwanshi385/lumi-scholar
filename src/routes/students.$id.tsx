@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Brain, Sparkles, Loader2, CheckCircle2, AlertTriangle, TrendingUp, Wand2 } from "lucide-react";
+import { ArrowLeft, Brain, Sparkles, Loader2, CheckCircle2, AlertTriangle, TrendingUp, Wand2, Link2, LinkIcon, Unlink } from "lucide-react";
 import { AppLayout } from "@/components/app-layout";
 import { AuthGuard } from "@/components/auth-guard";
 import { PerformanceBadge } from "@/components/performance-badge";
@@ -9,8 +9,12 @@ import { useStudent, performanceFromGpa, performanceGradient, avatarUrl } from "
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { predictPerformance, generateRecommendations } from "@/utils/ai.functions";
+import { linkStudentAccount, unlinkStudentAccount } from "@/utils/students.functions";
 import { callAuthed } from "@/lib/call-authed";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 
 export const Route = createFileRoute("/students/$id")({

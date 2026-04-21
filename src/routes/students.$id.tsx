@@ -46,14 +46,54 @@ function Detail() {
   const [generating, setGenerating] = useState(false);
   const [scoreForm, setScoreForm] = useState({ subject: "Math", score: "85" });
 
+  // Link Account state
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [linkedUserId, setLinkedUserId] = useState<string | null>(null);
+
   const predictFn = useServerFn(predictPerformance);
   const recsFn = useServerFn(generateRecommendations);
+  const linkFn = useServerFn(linkStudentAccount);
+  const unlinkFn = useServerFn(unlinkStudentAccount);
 
   useEffect(() => {
     if (!id) return;
     supabase.from("scores").select("*").eq("student_id", id).then(({ data }) => setScores((data ?? []) as unknown as Score[]));
     supabase.from("ai_recommendations").select("*").eq("student_id", id).order("created_at", { ascending: false }).then(({ data }) => setRecs((data ?? []) as Recommendation[]));
   }, [id]);
+
+  useEffect(() => {
+    setLinkedUserId(student?.user_id ?? null);
+  }, [student?.user_id]);
+
+  const linkAccount = async () => {
+    if (!id) return;
+    setLinking(true);
+    try {
+      const res = await callAuthed(linkFn, { studentId: id, email: linkEmail });
+      setLinkedUserId(res.linkedUserId);
+      toast.success(`Linked ${res.studentName} to ${linkEmail}`);
+      setLinkOpen(false);
+      setLinkEmail("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to link account");
+    }
+    setLinking(false);
+  };
+
+  const unlinkAccount = async () => {
+    if (!id) return;
+    setLinking(true);
+    try {
+      await callAuthed(unlinkFn, { studentId: id });
+      setLinkedUserId(null);
+      toast.success("Account unlinked");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to unlink");
+    }
+    setLinking(false);
+  };
 
   const addScore = async () => {
     if (!id) return;
